@@ -162,14 +162,3 @@ admin requests also send the returned CSRF token in `x-csrf-token`.
 | `npm run ai:smoke` | Make one real Gemini request using `.env` configuration |
 | `npm run check` | Type-check, run all tests, and build |
 | `npm start` | Run the compiled server after `npm run build` |
-
-## Deliberate demo limitations
-
-- The published admin credential demonstrates session mechanics, not private
-  access control.
-- Inquiry data is plaintext and must be synthetic.
-- AI jobs and rate-limit state are process-local; this is suitable for the demo,
-  not for horizontally scaled or guaranteed processing.
-- Docker Compose starts only PostgreSQL; no database backups or production
-  deployment configuration are included.
-- AI suggestions are never sent or acted on automatically.
