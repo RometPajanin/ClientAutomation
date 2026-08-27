@@ -23,9 +23,13 @@ const validAnalysis = {
   },
   missingFields: ["budget"],
   riskFlags: [],
-  suggestedAction: "ASSIGN_TO_SALES",
-  suggestedActionReason:
-    "The request is a qualified sales inquiry with a deadline.",
+  reply: {
+    recommended: true,
+    reason:
+      "The request is a legitimate sales inquiry.",
+    draft:
+      "Thank you for contacting us. We will review your website request and get back to you."
+  },
   confidence: 0.91
 } as const;
 
@@ -113,6 +117,51 @@ describe("analysisOutputSchema", () => {
       }).success
     ).toBe(false);
   });
+
+  it("rejects a missing contact claim when an email or phone exists", () => {
+    expect(
+      analysisOutputSchema.safeParse({
+        ...validAnalysis,
+        missingFields: ["contact"]
+      }).success
+    ).toBe(false);
+  });
+
+  it.each([
+    [
+      "a recommendation without a draft",
+      { recommended: true, reason: "Legitimate inquiry", draft: null }
+    ],
+    [
+      "a draft when no reply is recommended",
+      {
+        recommended: false,
+        reason: "Non-actionable spam",
+        draft: "This must not be present."
+      }
+    ]
+  ])("rejects %s", (_name, reply) => {
+    expect(
+      analysisOutputSchema.safeParse({
+        ...validAnalysis,
+        reply
+      }).success
+    ).toBe(false);
+  });
+
+  it("accepts a no-reply recommendation with a null draft", () => {
+    const result = analysisOutputSchema.parse({
+      ...validAnalysis,
+      category: "SPAM",
+      reply: {
+        recommended: false,
+        reason: "The message is non-actionable spam.",
+        draft: null
+      }
+    });
+
+    expect(result.missingFields).toEqual([]);
+  });
 });
 
 describe("analysisOutputJsonSchema", () => {
@@ -131,6 +180,16 @@ describe("analysisOutputJsonSchema", () => {
       analysisOutputJsonSchema.properties.extracted.required
     ).toEqual(
       analysisOutputJsonSchema.properties.extracted
+        .propertyOrdering
+    );
+    expect(
+      analysisOutputJsonSchema.properties.reply
+        .additionalProperties
+    ).toBe(false);
+    expect(
+      analysisOutputJsonSchema.properties.reply.required
+    ).toEqual(
+      analysisOutputJsonSchema.properties.reply
         .propertyOrdering
     );
   });

@@ -4,7 +4,7 @@ import { z } from "zod";
 // Allowed classification values
 // -----------------------------------------------------------------------------
 // Keep these values explicit: the AI may choose only values understood by the
-// database and the later deterministic decision engine.
+// database and the future admin interface.
 export const ANALYSIS_CATEGORIES = [
   "SALES",
   "SUPPORT",
@@ -47,17 +47,6 @@ export const ANALYSIS_RISK_FLAGS = [
   "THREAT_OR_ABUSE",
   "SENSITIVE_DATA",
   "OTHER"
-] as const;
-
-// Duplicate handling is intentionally absent. The server detects duplicates
-// before AI analysis, so the model must never make that decision.
-export const ANALYSIS_SUGGESTED_ACTIONS = [
-  "CREATE_DRAFT",
-  "REQUEST_MISSING_INFO",
-  "ASSIGN_TO_SALES",
-  "ASSIGN_TO_SUPPORT",
-  "HUMAN_REVIEW",
-  "IGNORE_SPAM"
 ] as const;
 
 // -----------------------------------------------------------------------------
@@ -142,6 +131,53 @@ const extractedInquirySchema = z
   })
   .strict();
 
+const replyRecommendationSchema = z
+  .object({
+    recommended: z
+      .boolean()
+      .describe(
+        "Whether a human reviewer would benefit from a customer-facing reply draft."
+      ),
+    reason: z
+      .string()
+      .trim()
+      .min(1)
+      .max(500)
+      .describe(
+        "A concise internal reason why a reply is or is not recommended."
+      ),
+    draft: z
+      .string()
+      .trim()
+      .min(1)
+      .max(1_500)
+      .nullable()
+      .describe(
+        "A short customer-facing draft when recommended is true; otherwise null."
+      )
+  })
+  .strict()
+  // A recommendation and its draft must never contradict one another.
+  .superRefine((reply, context) => {
+    if (reply.recommended && reply.draft === null) {
+      context.addIssue({
+        code: "custom",
+        path: ["draft"],
+        message:
+          "draft is required when a reply is recommended"
+      });
+    }
+
+    if (!reply.recommended && reply.draft !== null) {
+      context.addIssue({
+        code: "custom",
+        path: ["draft"],
+        message:
+          "draft must be null when a reply is not recommended"
+      });
+    }
+  });
+
 export const analysisOutputSchema = z
   .object({
     language: z
@@ -164,15 +200,7 @@ export const analysisOutputSchema = z
       ANALYSIS_RISK_FLAGS.length,
       "Safety or business risks that require deterministic handling or human review."
     ),
-    suggestedAction: z.enum(ANALYSIS_SUGGESTED_ACTIONS),
-    suggestedActionReason: z
-      .string()
-      .trim()
-      .min(1)
-      .max(1_000)
-      .describe(
-        "A factual explanation for the suggestion; server rules make the final decision."
-      ),
+    reply: replyRecommendationSchema,
     confidence: z
       .number()
       .min(0)
@@ -181,7 +209,51 @@ export const analysisOutputSchema = z
         "Model-estimated confidence from 0 to 1; this value is not trusted by itself."
       )
   })
-  .strict();
+  .strict()
+  // Reject structurally valid but self-contradictory model classifications.
+  .superRefine((analysis, context) => {
+    // Missing information is relevant only when a human may use the reply draft.
+    if (!analysis.reply.recommended) {
+      return;
+    }
+
+    const missingFields = new Set(analysis.missingFields);
+    const directlyExtractedFields = [
+      ["name", analysis.extracted.name],
+      ["requestedService", analysis.extracted.requestedService],
+      ["deadline", analysis.extracted.deadline],
+      ["budget", analysis.extracted.budget]
+    ] as const;
+
+    for (const [field, value] of directlyExtractedFields) {
+      if (missingFields.has(field) && value !== null) {
+        context.addIssue({
+          code: "custom",
+          path: ["missingFields"],
+          message: `${field} cannot be missing when it was extracted`
+        });
+      }
+    }
+
+    if (
+      missingFields.has("contact") &&
+      (analysis.extracted.email !== null ||
+        analysis.extracted.phone !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["missingFields"],
+        message:
+          "contact cannot be missing when email or phone was extracted"
+      });
+    }
+  })
+  // Do not show irrelevant missing-data warnings for spam or other no-reply cases.
+  .transform((analysis) =>
+    analysis.reply.recommended
+      ? analysis
+      : { ...analysis, missingFields: [] }
+  );
 
 export type AnalysisOutput = z.output<
   typeof analysisOutputSchema
@@ -204,10 +276,9 @@ export const analysisOutputJsonSchema = {
     "priority",
     "sentiment",
     "extracted",
+    "reply",
     "missingFields",
     "riskFlags",
-    "suggestedAction",
-    "suggestedActionReason",
     "confidence"
   ],
   properties: {
@@ -298,7 +369,7 @@ export const analysisOutputJsonSchema = {
       type: "array",
       maxItems: ANALYSIS_MISSING_FIELDS.length,
       description:
-        "Information still needed to properly handle the inquiry; use an empty array when nothing is missing.",
+        "Information needed to answer a legitimate inquiry. List only absent values; contact means both email and phone are null. When reply.recommended is false, use an empty array.",
       items: {
         type: "string",
         enum: ANALYSIS_MISSING_FIELDS
@@ -314,16 +385,30 @@ export const analysisOutputJsonSchema = {
         enum: ANALYSIS_RISK_FLAGS
       }
     },
-    suggestedAction: {
-      type: "string",
-      enum: ANALYSIS_SUGGESTED_ACTIONS,
+    reply: {
+      type: "object",
       description:
-        "Model suggestion only. The server decision engine chooses the final action."
-    },
-    suggestedActionReason: {
-      type: "string",
-      description:
-        "Factual reason for the suggested action. Maximum 1000 characters."
+        "Reply recommendation and optional draft for a human reviewer. Nothing is sent automatically.",
+      additionalProperties: false,
+      propertyOrdering: ["recommended", "reason", "draft"],
+      properties: {
+        recommended: {
+          type: "boolean",
+          description:
+            "True for a legitimate actionable inquiry; false for non-actionable spam, pure abuse, scams, irrelevant content, or meaningless content."
+        },
+        reason: {
+          type: "string",
+          description:
+            "Concise internal explanation for the recommendation. Maximum 500 characters."
+        },
+        draft: {
+          type: ["string", "null"],
+          description:
+            "When recommended is true, a short customer-facing draft in the customer's language. When false, null. Maximum 1500 characters."
+        }
+      },
+      required: ["recommended", "reason", "draft"]
     },
     confidence: {
       type: "number",
@@ -339,10 +424,9 @@ export const analysisOutputJsonSchema = {
     "priority",
     "sentiment",
     "extracted",
+    "reply",
     "missingFields",
     "riskFlags",
-    "suggestedAction",
-    "suggestedActionReason",
     "confidence"
   ]
 } as const;

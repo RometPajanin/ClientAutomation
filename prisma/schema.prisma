@@ -37,6 +37,13 @@ enum InquiryPriority {
   URGENT
 }
 
+enum InquirySentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+  MIXED
+}
+
 enum InquiryNextAction {
   CREATE_DRAFT
   REQUEST_MISSING_INFO
@@ -67,6 +74,7 @@ model Inquiry {
 
   category   InquiryCategory?
   priority   InquiryPriority?
+  sentiment  InquirySentiment?
   language   String?
   confidence Float?
   summary    String?
@@ -77,7 +85,11 @@ model Inquiry {
 
   nextAction        InquiryNextAction?
   actionReason      String?
-  responseDraft     String?
+  aiSuggestedAction InquiryNextAction?
+  aiSuggestedActionReason String?
+  replyRecommended          Boolean?
+  replyRecommendationReason String?
+  responseDraft             String?
   analysisErrorCode String?
   analyzedAt        DateTime?
 
@@ -93,6 +105,7 @@ model Inquiry {
   @@index([status])
   @@index([category])
   @@index([priority])
+  @@index([replyRecommended])
   @@index([fingerprint, createdAt])
   @@index([duplicateOfId])
   @@index([aiPromptVersionId])

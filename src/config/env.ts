@@ -50,6 +50,21 @@ const envSchema = z.object({
     .min(1)
     .default("gemini-3.1-flash-lite"),
 
+  GEMINI_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .max(120_000)
+    .default(20_000),
+
+  // This is the number of retries after the first request, not total attempts.
+  GEMINI_MAX_RETRIES: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(5)
+    .default(2),
+
   INQUIRY_RATE_LIMIT_MAX: z.coerce
     .number()
     .int()

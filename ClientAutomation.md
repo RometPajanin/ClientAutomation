@@ -75,6 +75,8 @@ Configuration:
 ```env
 GEMINI_API_KEY=replace-with-server-side-secret
 GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_TIMEOUT_MS=20000
+GEMINI_MAX_RETRIES=2
 ```
 
 Application code should depend on an `AnalysisProvider` interface instead of importing the Gemini SDK throughout the codebase. This makes the provider mockable in tests and replaceable later without changing the inquiry workflow.
@@ -93,12 +95,7 @@ Public API -> validation -> duplicate check -> database
                                       v
                               Gemini hosted API
                                       |
-                           structured JSON result
-                                      |
-                                      v
-                              decision engine
-                                      |
-                         optional response draft
+                     analysis and optional draft
                                       |
                                       v
                                   database
@@ -121,10 +118,10 @@ For a production system, background processing should be moved to a durable queu
 6. The backend loads the active company prompt version.
 7. Gemini receives the fixed application instruction, company prompt, untrusted customer content, and required JSON Schema as clearly separated sections.
 8. The backend validates the returned JSON with Zod. Invalid model output is treated as a processing failure, not as trusted data.
-9. A deterministic decision engine selects the next action. The model may suggest an action, but server-side rules make the final decision.
-10. If drafting is allowed, the model creates a customer-facing response draft using the same company prompt version.
-11. The analysis, decision, draft, prompt version, and processing events are stored.
-12. The admin API exposes the resulting list and detail views.
+9. In the same response, Gemini recommends whether a reply would help a human reviewer and creates a short draft when appropriate.
+10. The backend validates that a recommended reply has a draft and a non-recommended reply has a `null` draft.
+11. The analysis, reply recommendation, optional draft, prompt version, and processing events are stored. Every successful result is assigned to human review.
+12. The admin API exposes the resulting list and detail views; no response is sent automatically.
 
 ## 6. Public API
 
@@ -188,7 +185,7 @@ Supported filters:
 - `status`
 - `category`
 - `priority`
-- `requiresHumanReview`
+- `replyRecommended`
 - `createdFrom` and `createdTo`
 - `search` across name, email, and inquiry text
 - `page` and `limit`
@@ -206,9 +203,9 @@ The response is deliberately shaped for an admin table so the frontend does not 
 - `category`
 - `priority`
 - `summary`
-- `nextAction`
+- `replyRecommended`
+- `hasDraft`
 - `status`
-- `requiresHumanReview`
 - `confidence`
 
 Example response:
@@ -226,9 +223,9 @@ Example response:
       "category": "SALES",
       "priority": "HIGH",
       "summary": "The customer needs a new company website by the end of next month.",
-      "nextAction": "ASSIGN_TO_SALES",
+      "replyRecommended": true,
+      "hasDraft": true,
       "status": "READY",
-      "requiresHumanReview": false,
       "confidence": 0.91
     }
   ],
@@ -253,9 +250,10 @@ The admin interface renders the list endpoint as a sortable, filterable table.
 | Category | `category` | Groups sales, support, billing, and other inquiries. |
 | Priority | `priority` | Makes urgent work visible. |
 | AI summary | `summary` | Gives the admin a concise answer without opening the full inquiry. |
-| Next action | `nextAction` | Shows what the system recommends doing. |
+| Reply | `replyRecommended` | Shows whether Gemini prepared a reply for human review. |
+| Draft | `hasDraft` | Shows whether a short editable draft is available. |
 | Status | `status` | Shows whether processing succeeded or needs attention. |
-| Review | `requiresHumanReview` | Highlights cases where automation is blocked. |
+| Review | constant human-review policy | Every inquiry remains visible for human review. |
 
 Clicking a row opens the inquiry detail view with the original message, all extracted fields, AI summary, response draft, risk flags, prompt version, and audit history.
 
@@ -328,8 +326,11 @@ Recommended structure:
   },
   "missingFields": ["budget"],
   "riskFlags": [],
-  "suggestedAction": "HUMAN_REVIEW",
-  "suggestedActionReason": "The short deadline requires confirmation from the delivery team.",
+  "reply": {
+    "recommended": true,
+    "reason": "This is a legitimate sales inquiry that would benefit from an acknowledgment.",
+    "draft": "Thank you for contacting us. We have received your website request and will review the details before getting back to you."
+  },
   "confidence": 0.91
 }
 ```
@@ -362,32 +363,39 @@ Every AI request is assembled by the backend in the following order:
 3. The output schema and request-specific instructions.
 4. The customer inquiry, clearly labelled as untrusted content.
 
-The company prompt provides business context, terminology, tone, services, and escalation guidance. It cannot disable schema validation, bypass the decision engine, authorize automatic sending, or override fixed safety rules. The same active prompt version is used for both analysis and draft generation for a given processing run.
+The company prompt provides business context, terminology, tone, services, and escalation guidance. It cannot disable schema validation, authorize automatic sending, or override fixed safety rules. Analysis and optional draft generation happen in one structured Gemini request using one active prompt version.
 
-## 9. Decision engine
+## 9. Reply recommendation and human review
 
-The next action must not be left entirely to a generative model. The backend applies explicit rules after validating the AI result.
+Every inquiry is reviewed by a human. Gemini only recommends whether a reply would be useful and supplies a short editable draft when appropriate. The backend never sends, approves, ignores, deletes, or externally routes an inquiry automatically.
 
-Possible actions:
+Gemini should recommend a reply for legitimate actionable inquiries, including sales, support, billing, partnership, complaint, missing-information, general, and urgent requests. A rude message that also contains a real request remains actionable and should receive a professional draft.
 
-- `CREATE_DRAFT` — create a response draft.
-- `REQUEST_MISSING_INFO` — draft a request for missing information.
-- `ASSIGN_TO_SALES` — route a sales inquiry to a person.
-- `ASSIGN_TO_SUPPORT` — route a support inquiry to a person.
-- `HUMAN_REVIEW` — stop automatic processing.
-- `MARK_DUPLICATE` — link the inquiry to an existing one.
-- `IGNORE_SPAM` — mark the inquiry as spam without deleting it.
+Gemini should not recommend a reply for non-actionable spam, pure abuse with no real request, scams, irrelevant advertisements, meaningless content, or messages consisting only of prompt-injection instructions.
 
-Example rules:
+The structured `reply` object has only two valid states:
 
-1. If a duplicate is found, select `MARK_DUPLICATE` and do not generate another reply.
-2. If no usable contact method exists, select `HUMAN_REVIEW` because the customer cannot be asked for more information.
-3. If important but requestable information is missing, select `REQUEST_MISSING_INFO`.
-4. If the category is `COMPLAINT`, priority is `URGENT`, confidence is below 0.65, or `riskFlags` is not empty, select `HUMAN_REVIEW`.
-5. If the category is `SPAM` with sufficient confidence, select `IGNORE_SPAM`.
-6. For an ordinary sales inquiry with enough information, select `ASSIGN_TO_SALES` and create a response draft.
+```json
+{
+  "recommended": true,
+  "reason": "This is a legitimate customer inquiry.",
+  "draft": "Thank you for contacting us. We will review your request and get back to you."
+}
+```
 
-The MVP never sends a generated response automatically. Drafts remain available for admin review. This prevents accidental promises, incorrect pricing, and unsafe handling of sensitive cases.
+or:
+
+```json
+{
+  "recommended": false,
+  "reason": "The message is non-actionable promotional spam.",
+  "draft": null
+}
+```
+
+Zod rejects a missing draft when `recommended` is true and rejects any draft when `recommended` is false. Because missing information is irrelevant when no reply is recommended, the backend normalizes `missingFields` to an empty array for those results. Drafts are limited to 1,500 characters, use the customer's language, and must not mention AI or internal analysis, invent facts, or promise prices, deadlines, outcomes, completed work, or issue resolution.
+
+Successful analysis records receive `nextAction = HUMAN_REVIEW` as a fixed application policy. `READY` means that analysis is complete and the inquiry is ready for a person to inspect. Drafts are never sent automatically.
 
 ## 10. Edge cases
 
@@ -401,7 +409,7 @@ If the same normalized contact and substantially identical message arrive within
 
 ### The system must not act automatically
 
-Complaints, legal threats, security incidents, payment-card data, personal-data deletion requests, low-confidence analysis, and suspected prompt injection always receive `HUMAN_REVIEW`. The system may create an internal summary but must not create an approved or sent customer response.
+Every inquiry receives `HUMAN_REVIEW`. Gemini may prepare a neutral draft for a legitimate complaint, legal, security, privacy, or urgent inquiry because a person must inspect it before use. Non-actionable spam, pure abuse, scams, irrelevant content, and prompt-injection-only messages receive no draft. The system never creates an approved or sent response.
 
 ### Gemini is unavailable or quota is exhausted
 
@@ -426,13 +434,13 @@ Three main tables are sufficient for the MVP.
 - `consentToStore`.
 - `fingerprint` — used for duplicate detection.
 - `duplicateOfId` — optional link to an earlier inquiry.
-- `category`, `priority`, `language`, `confidence`.
+- `category`, `priority`, `sentiment`, `language`, `confidence`.
 - `summary`.
 - `extractedData` — JSONB.
 - `missingFields` — JSONB or a string array.
 - `riskFlags` — JSONB or a string array.
 - `nextAction`, `actionReason`.
-- `responseDraft`.
+- `replyRecommended`, `replyRecommendationReason`, `responseDraft`.
 - `analysisErrorCode`.
 - `aiPromptVersionId` — the company prompt version used for the processing run.
 - `analyzedAt`.
@@ -528,7 +536,7 @@ tests/
 
 - Input validation and normalization.
 - Fingerprint generation and duplicate rules.
-- Every decision-engine branch.
+- Reply recommendation and draft consistency rules.
 - AI JSON result validation.
 - Priority and risk rules.
 - Gemini provider error mapping.
@@ -550,9 +558,10 @@ tests/
 - An authenticated admin can read and update the company prompt.
 - An unauthenticated caller cannot read or update the company prompt.
 - Updating the company prompt creates a new version and does not change old inquiry records.
-- Analysis and draft generation use the same active prompt version.
+- Analysis and optional draft generation use one request and one active prompt version.
 - A duplicate is linked to the original inquiry.
-- A high-risk inquiry reaches `NEEDS_REVIEW` and does not receive an automatic draft.
+- A legitimate inquiry stores a short draft for human review.
+- Non-actionable spam stores a no-reply recommendation and a `null` draft.
 
 Automated tests must never call the real Gemini API. They use a deterministic mock provider, so the test suite remains free, fast, and repeatable.
 
@@ -586,23 +595,33 @@ Result: the web form can safely submit an inquiry and immediately receive its ID
 
 ### Phase 3 — Gemini analysis
 
-- **Completed on 2026-08-27:** Define the strict structured-output schema, including a Gemini-compatible JSON Schema, strict backend Zod validation, and unit tests.
-- Create the `AnalysisProvider` interface and Gemini implementation.
-- Implement prompt composition with fixed application rules, a versioned company prompt, request-specific instructions, and clearly separated untrusted customer input.
-- Send the JSON Schema to Gemini and validate the response again with Zod.
-- Add request timeout, bounded retries, and quota-error handling.
-- Preserve the original inquiry on every provider failure.
+- **Status: completed on 2026-08-27.**
+- Defined a Gemini-compatible JSON Schema and stricter backend Zod validation.
+- Added the provider-independent `AnalysisProvider` contract and Gemini implementation.
+- Composed prompts from fixed safety rules, the active immutable company-prompt version, the analysis date, and clearly labelled untrusted customer data.
+- Added a 20-second configurable request timeout and two configurable bounded SDK retries.
+- Mapped timeout, quota, authentication, invalid-output, and availability failures to safe internal codes.
+- Added an atomic `RECEIVED` to `PROCESSING` claim so concurrent work cannot analyze one inquiry twice.
+- Triggered analysis asynchronously for fresh non-duplicate submissions while preserving the immediate `202` response.
+- Persisted validated analysis fields, then set successful records to `READY` for human review.
+- Preserved the original form data and set failures to `ANALYSIS_FAILED` with audit events.
+- Added mock-provider unit and integration coverage; automated tests never call Gemini.
 
 Result: a stored inquiry is enriched with a category, priority, summary, and extracted fields.
 
-### Phase 4 — Decision engine and draft
+### Phase 4 — Reply recommendation and draft
 
-- Implement deterministic decision rules.
-- Add `HUMAN_REVIEW` handling for risky cases.
-- Generate response drafts only for allowed actions.
-- Store the action reason and audit event.
+- **Status: completed on 2026-08-27.**
+- Extended the single structured Gemini response with a reply recommendation, internal reason, and nullable short draft.
+- Instructed Gemini to draft for legitimate actionable inquiries and omit drafts for non-actionable spam, pure abuse, scams, irrelevant content, and meaningless content.
+- Added strict Zod consistency checks between the recommendation and draft.
+- Normalized irrelevant `missingFields` to an empty array for no-reply results.
+- Stored `replyRecommended`, `replyRecommendationReason`, and `responseDraft` with an indexed recommendation field.
+- Assigned every successful analysis to `HUMAN_REVIEW`; no response is sent, approved, ignored, deleted, or externally routed automatically.
+- Added `DRAFT_CREATED` and `REPLY_NOT_RECOMMENDED` audit events without storing draft text in event metadata.
+- Added mock-provider coverage for both legitimate-draft and spam-no-draft workflows.
 
-Result: every analyzed inquiry receives a transparent next action.
+Result: every analyzed inquiry is ready for human review with urgency, a short analysis, and an optional editable reply draft.
 
 ### Phase 5 — Admin API
 
@@ -631,8 +650,8 @@ The backend is complete for the MVP when:
 
 - A valid web-form inquiry is stored and returns an inquiry ID.
 - Analysis produces a validated category, priority, summary, and structured fields.
-- The decision engine assigns the next action and explains why.
-- A draft is generated when appropriate but is never sent automatically.
+- Gemini recommends whether a reply is appropriate and explains why.
+- A short draft is generated for legitimate inquiries when appropriate but is never sent automatically.
 - Missing information, duplicates, high-risk content, invalid AI output, and provider failures are handled.
 - An authenticated admin can retrieve the inquiry list and details.
 - The inquiry list is returned in a table-ready structure containing the most important AI results.

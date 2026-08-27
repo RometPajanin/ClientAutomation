@@ -2,6 +2,11 @@ import rateLimit from "@fastify/rate-limit";
 import type { FastifyPluginAsync } from "fastify";
 
 import { env } from "../../config/env.js";
+import type { AnalysisProvider } from "../analysis/analysis.provider.js";
+import { AnalysisRepository } from "../analysis/analysis.repository.js";
+import { InProcessAnalysisRunner } from "../analysis/analysis.runner.js";
+import { AnalysisService } from "../analysis/analysis.service.js";
+import { InquiryStatus } from "../../generated/prisma/enums.js";
 import { AppError } from "../../shared/errors.js";
 import { InquiryRepository } from "./inquiry.repository.js";
 import {
@@ -13,9 +18,13 @@ import type { CreateInquiryResponse } from "./inquiry.types.js";
 
 const MAX_REQUEST_BODY_BYTES = 20_000;
 
-export const inquiryRoutes: FastifyPluginAsync = async (
-  app
-) => {
+export interface InquiryRoutesOptions {
+  analysisProvider: AnalysisProvider | null;
+}
+
+export const inquiryRoutes: FastifyPluginAsync<
+  InquiryRoutesOptions
+> = async (app, options) => {
   // Rate limiting is scoped to public inquiry routes rather than health/admin APIs.
   await app.register(rateLimit, {
     global: false,
@@ -33,6 +42,20 @@ export const inquiryRoutes: FastifyPluginAsync = async (
 
   const repository = new InquiryRepository(app.prisma);
   const service = new InquiryService(repository);
+  const analysisRunner = options.analysisProvider
+    ? new InProcessAnalysisRunner(
+        new AnalysisService(
+          new AnalysisRepository(app.prisma),
+          options.analysisProvider
+        ),
+        app.log
+      )
+    : null;
+
+  // Let active in-process tasks finish before Prisma disconnects on shutdown.
+  app.addHook("onClose", async () => {
+    await analysisRunner?.drain();
+  });
 
   app.post(
     "/api/v1/inquiries",
@@ -83,6 +106,14 @@ export const inquiryRoutes: FastifyPluginAsync = async (
         },
         "Inquiry accepted"
       );
+
+      // Replays and known duplicates must not spend another provider request.
+      if (
+        !result.idempotentReplay &&
+        result.status === InquiryStatus.RECEIVED
+      ) {
+        analysisRunner?.enqueue(result.id);
+      }
 
       return reply.status(202).send(response);
     }
