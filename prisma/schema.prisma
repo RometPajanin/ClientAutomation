@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum InquiryStatus {
+  RECEIVED
+  PROCESSING
+  READY
+  NEEDS_REVIEW
+  DUPLICATE
+  ANALYSIS_FAILED
+}
+
+enum InquirySource {
+  WEB_FORM
+}
+
+enum InquiryCategory {
+  SALES
+  SUPPORT
+  BILLING
+  COMPLAINT
+  PARTNERSHIP
+  SPAM
+  OTHER
+}
+
+enum InquiryPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum InquiryNextAction {
+  CREATE_DRAFT
+  REQUEST_MISSING_INFO
+  ASSIGN_TO_SALES
+  ASSIGN_TO_SUPPORT
+  HUMAN_REVIEW
+  MARK_DUPLICATE
+  IGNORE_SPAM
+}
+
+model Inquiry {
+  id              String        @id @default(uuid())
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  status          InquiryStatus @default(RECEIVED)
+  source          InquirySource @default(WEB_FORM)
+  sourceReference String?       @unique
+
+  name           String?
+  email          String?
+  phone          String?
+  service        String?
+  message        String
+  consentToStore Boolean
+
+  fingerprint   String
+  duplicateOfId String?
+
+  category   InquiryCategory?
+  priority   InquiryPriority?
+  language   String?
+  confidence Float?
+  summary    String?
+
+  extractedData Json?
+  missingFields Json?
+  riskFlags     Json?
+
+  nextAction        InquiryNextAction?
+  actionReason      String?
+  responseDraft     String?
+  analysisErrorCode String?
+  analyzedAt        DateTime?
+
+  aiPromptVersionId String?
+
+  duplicateOf     Inquiry?         @relation("InquiryDuplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates      Inquiry[]        @relation("InquiryDuplicates")
+  aiPromptVersion AiPromptVersion? @relation(fields: [aiPromptVersionId], references: [id], onDelete: SetNull)
+
+  events InquiryEvent[]
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([category])
+  @@index([priority])
+  @@index([fingerprint, createdAt])
+  @@index([duplicateOfId])
+  @@index([aiPromptVersionId])
+}
+
+model InquiryEvent {
+  id        String   @id @default(uuid())
+  inquiryId String
+  type      String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  inquiry Inquiry @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+
+  @@index([inquiryId, createdAt])
+}
+
+model AiPromptVersion {
+  id            String   @id @default(uuid())
+  version       Int      @unique
+  companyPrompt String
+  isActive      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  createdBy     String?
+
+  inquiries Inquiry[]
+
+  @@index([isActive])
+}
