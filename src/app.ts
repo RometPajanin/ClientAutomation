@@ -1,12 +1,14 @@
 import fastify, { type FastifyInstance } from "fastify";
 
 import { env } from "./config/env.js";
+import { adminRoutes } from "./modules/admin/admin.routes.js";
 import type { AnalysisProvider } from "./modules/analysis/analysis.provider.js";
 import { GeminiAnalysisProvider } from "./modules/analysis/gemini.provider.js";
 import { healthRoutes } from "./modules/health/health.routes.js";
 import { inquiryRoutes } from "./modules/inquiries/inquiry.routes.js";
 import { databasePlugin } from "./plugins/database.js";
 import { registerErrorHandler } from "./plugins/error-handler.js";
+import { swaggerPlugin } from "./plugins/swagger.js";
 
 export interface BuildAppOptions {
   logger?: boolean;
@@ -44,9 +46,11 @@ export function buildApp(
   // Register shared infrastructure before feature routes that depend on it.
   registerErrorHandler(app);
 
+  app.register(swaggerPlugin);
   app.register(databasePlugin);
   app.register(healthRoutes);
   app.register(inquiryRoutes, { analysisProvider });
+  app.register(adminRoutes, { prefix: "/api/v1/admin" });
 
   if (!analysisProvider && env.NODE_ENV !== "test") {
     app.log.warn(

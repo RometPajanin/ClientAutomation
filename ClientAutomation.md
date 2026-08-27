@@ -14,7 +14,7 @@ The backend must:
 2. Validate and store the original submission before starting AI processing.
 3. Analyze the inquiry through a hosted AI API.
 4. Store the validated, structured analysis result.
-5. Apply deterministic rules to decide the next action.
+5. Assign every inquiry to human review after AI analysis.
 6. Generate a response draft when appropriate, but never send it automatically in the MVP.
 7. Expose list and detail endpoints for an admin application.
 8. Handle missing information, duplicate inquiries, AI failures, and situations that require human review.
@@ -176,6 +176,14 @@ Possible errors:
 
 All admin endpoints are placed under `/api/v1/admin` and require authentication. The MVP can use an admin API key stored in an environment variable. A production version should use real users and role-based authorization.
 
+The client sends the configured key in the following header:
+
+```http
+x-admin-api-key: replace-with-your-admin-api-key
+```
+
+Missing and incorrect keys receive `401 Unauthorized`. The key is compared using a timing-safe comparison and is never written to logs. The API key must contain at least 16 characters.
+
 ### `GET /api/v1/admin/inquiries`
 
 Returns a paginated inquiry list.
@@ -189,8 +197,10 @@ Supported filters:
 - `createdFrom` and `createdTo`
 - `search` across name, email, and inquiry text
 - `page` and `limit`
+- `sortBy` - `createdAt`, `customerName`, `requestedService`, `category`, `priority`, or `status`
+- `sortOrder` - `asc` or `desc`
 
-The default sort order is newest first. The response includes total-count and pagination metadata.
+The default sort order is newest first. The default page size is 25 and the maximum is 100. The response includes total-count and pagination metadata.
 
 The response is deliberately shaped for an admin table so the frontend does not need to transform raw AI JSON. Each row contains:
 
@@ -283,6 +293,8 @@ Returns the currently active company prompt and its metadata.
 }
 ```
 
+Before the first prompt has been saved, the endpoint returns an empty `companyPrompt` with `null` for `version` and `updatedAt`.
+
 ### `PUT /api/v1/admin/settings/ai`
 
 Updates the company-specific prompt used in every Gemini request.
@@ -296,6 +308,10 @@ Updates the company-specific prompt used in every Gemini request.
 The endpoint trims the value, enforces a maximum length of 5,000 characters, and creates a new immutable prompt version instead of overwriting history. An empty string is allowed and means that no additional company context is active. Updating the prompt affects only new AI operations; previously completed inquiries retain the prompt-version reference used for them.
 
 The admin UI presents this setting as a multiline text area with Save and Reset actions, the active version, last-updated time, and a clear notice that secrets and personal data must not be placed in the prompt.
+
+### API documentation
+
+Interactive Swagger documentation is available at `GET /documentation`. The generated OpenAPI JSON is available at `GET /documentation/json`. Swagger declares `x-admin-api-key` as the `AdminApiKey` security scheme so authenticated requests can be tried from the documentation page.
 
 ### Recommended later endpoints
 
@@ -482,8 +498,11 @@ src/
       inquiry.repository.ts
       inquiry.types.ts
     admin/
+      admin.auth.ts
+      admin.repository.ts
       admin.routes.ts
       admin.schemas.ts
+      admin.service.ts
     settings/
       ai-settings.routes.ts
       ai-settings.schemas.ts
@@ -498,9 +517,9 @@ src/
     decisions/
       decision-engine.ts
   plugins/
-    auth.ts
     database.ts
     error-handler.ts
+    swagger.ts
   shared/
     errors.ts
     logger.ts
@@ -631,6 +650,14 @@ Result: every analyzed inquiry is ready for human review with urgency, a short a
 - Implement the read and update endpoints for the versioned company prompt.
 - Define the admin table columns and company-prompt text-area contract for the frontend.
 - Document endpoints with Swagger.
+
+- **Status: completed on 2026-08-27.**
+- Protected the complete `/api/v1/admin` scope with the `x-admin-api-key` header and a timing-safe key comparison.
+- Added table-ready list output with bounded pagination, explicit sortable fields, combined filters, case-insensitive search, and newest-first defaults.
+- Added a detail response containing the original submission, structured AI analysis, reply draft, required human-review state, duplicate reference, prompt version, and audit history without exposing the internal fingerprint.
+- Added company-prompt read and update endpoints. Each save trims the prompt and creates a new immutable version in a serializable transaction; an empty prompt acts as Reset.
+- Added Swagger UI at `/documentation` and OpenAPI JSON at `/documentation/json` with an admin API-key security scheme.
+- Added Phase 5 integration tests for authentication, filters, pagination, sorting, detail retrieval, missing records, prompt history, and OpenAPI publication.
 
 Result: an admin application can securely display organized AI results and manage the business-specific prompt used in future AI requests.
 
