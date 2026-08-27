@@ -669,6 +669,13 @@ Result: an admin application can securely display organized AI results and manag
 - Document API-key setup, startup, migrations, and API usage.
 - Verify type checking, tests, and the production build.
 
+- **Requested setup subset completed on 2026-08-27.**
+- Hardened the existing PostgreSQL Docker Compose service by binding it to localhost and adding a startup grace period while preserving the existing persistent volume identity.
+- Completed `.env.example` with every supported setting, including Gemini timeout and retry controls, without placing real secrets in source control.
+- Added `README.md` with exact PowerShell commands for admin and Gemini API-key setup, dependency installation, Docker startup, Prisma Client generation, migration deployment and development, API calls, Swagger, verification, and compiled startup.
+- Verified the Docker Compose configuration, migration state, type checking, automated tests, and production build.
+- Seed data remains a separate Phase 6 task and is not included in this requested subset.
+
 Result: the backend can be started locally from one documented workflow and is ready for demonstration.
 
 ## 16. MVP completion criteria
