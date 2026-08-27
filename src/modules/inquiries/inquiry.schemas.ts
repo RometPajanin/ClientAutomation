@@ -1,22 +1,24 @@
 import { z } from "zod";
 
-// HTML forms commonly submit optional empty fields as "" instead of omitting them.
-function emptyStringToUndefined(value: unknown): unknown {
-  return typeof value === "string" && value.trim() === ""
+// Form clients commonly submit optional empty fields as "" or null instead of
+// omitting them.
+function emptyOptionalValueToUndefined(value: unknown): unknown {
+  return value === null ||
+    (typeof value === "string" && value.trim() === "")
     ? undefined
     : value;
 }
 
 function optionalTrimmedString(maxLength: number) {
   return z.preprocess(
-    emptyStringToUndefined,
+    emptyOptionalValueToUndefined,
     z.string().trim().min(1).max(maxLength).optional()
   );
 }
 
 // Field-specific schemas both validate and perform safe, local transformations.
 const optionalEmail = z.preprocess(
-  emptyStringToUndefined,
+  emptyOptionalValueToUndefined,
   z
     .string()
     .trim()
@@ -27,7 +29,7 @@ const optionalEmail = z.preprocess(
 );
 
 const optionalPhone = z.preprocess(
-  emptyStringToUndefined,
+  emptyOptionalValueToUndefined,
   z
     .string()
     .trim()
@@ -53,7 +55,10 @@ export const createInquirySchema = z
       .refine((value) => value, {
         message: "consentToStore must be true"
       }),
-    sourceReference: optionalTrimmedString(200)
+    sourceReference: optionalTrimmedString(200),
+    // Older web clients sent this field. Accept it for compatibility, but do
+    // not use it: this public endpoint assigns the trusted source server-side.
+    source: optionalTrimmedString(100)
   })
   .strict()
   // Contact is a cross-field rule: either email or phone is acceptable.

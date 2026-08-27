@@ -10,16 +10,16 @@ import {
 } from "vitest";
 
 import { buildApp } from "../src/app.js";
-import { env } from "../src/config/env.js";
+import { loginAsDemoAdmin } from "./helpers/auth.js";
 
 const testToken = randomUUID();
 const testPrefix = `phase-5-test-${testToken}`;
-const adminHeaders = {
-  "x-admin-api-key": env.ADMIN_API_KEY
-};
-
 describe("Phase 5 admin API", () => {
   let app: FastifyInstance;
+  let adminHeaders: {
+    cookie: string;
+    "x-csrf-token": string;
+  };
   let salesInquiryId: string;
   let detailPromptId: string;
   let originalActivePromptIds: string[] = [];
@@ -28,6 +28,11 @@ describe("Phase 5 admin API", () => {
   beforeAll(async () => {
     app = buildApp({ logger: false });
     await app.ready();
+    const authenticated = await loginAsDemoAdmin(app);
+    adminHeaders = {
+      cookie: authenticated.cookie,
+      "x-csrf-token": authenticated.csrfToken
+    };
 
     const activePrompts =
       await app.prisma.aiPromptVersion.findMany({
@@ -57,7 +62,7 @@ describe("Phase 5 admin API", () => {
         sourceReference: `${testPrefix}-sales`,
         name: `Phase Five Customer ${testToken}`,
         email: `phase-five-${testToken}@example.com`,
-        service: "Website development",
+        service: `Website development ${testToken}`,
         message:
           "Please create a company website before the end of next month.",
         consentToStore: true,
@@ -72,7 +77,7 @@ describe("Phase 5 admin API", () => {
           "The customer needs a company website next month.",
         extractedData: {
           name: `Phase Five Customer ${testToken}`,
-          requestedService: "Website development"
+          requestedService: `Website development ${testToken}`
         },
         missingFields: ["budget"],
         riskFlags: [],
@@ -165,7 +170,7 @@ describe("Phase 5 admin API", () => {
     await app.close();
   });
 
-  it("rejects missing and incorrect admin API keys", async () => {
+  it("rejects missing and invalid admin sessions", async () => {
     const missing = await app.inject({
       method: "GET",
       url: "/api/v1/admin/inquiries"
@@ -173,15 +178,29 @@ describe("Phase 5 admin API", () => {
     const incorrect = await app.inject({
       method: "GET",
       url: "/api/v1/admin/settings/ai",
-      headers: { "x-admin-api-key": "incorrect-admin-key" }
+      headers: { cookie: "ca_session=invalid-session" }
     });
 
     expect(missing.statusCode).toBe(401);
     expect(missing.json()).toMatchObject({
       error: { code: "ADMIN_AUTH_REQUIRED" }
     });
-    expect(missing.headers["www-authenticate"]).toBe("ApiKey");
+    expect(missing.headers["www-authenticate"]).toBe("Session");
     expect(incorrect.statusCode).toBe(401);
+  });
+
+  it("rejects a state-changing admin request without CSRF", async () => {
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/v1/admin/settings/ai",
+      headers: { cookie: adminHeaders.cookie },
+      payload: { companyPrompt: "This update must be rejected." }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      error: { code: "CSRF_TOKEN_INVALID" }
+    });
   });
 
   it("returns filtered table-ready inquiry rows", async () => {
@@ -203,7 +222,7 @@ describe("Phase 5 admin API", () => {
           createdAt: "2026-08-26T09:30:00.000Z",
           customerName: `Phase Five Customer ${testToken}`,
           contact: `phase-five-${testToken}@example.com`,
-          requestedService: "Website development",
+          requestedService: `Website development ${testToken}`,
           messagePreview:
             "Please create a company website before the end of next month.",
           category: "SALES",
@@ -222,6 +241,22 @@ describe("Phase 5 admin API", () => {
         total: 1,
         totalPages: 1
       }
+    });
+  });
+
+  it("searches requested services", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url:
+        "/api/v1/admin/inquiries" +
+        `?search=${encodeURIComponent(`Website development ${testToken}`)}`,
+      headers: adminHeaders
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      items: [{ id: salesInquiryId }],
+      pagination: { total: 1 }
     });
   });
 
@@ -328,6 +363,7 @@ describe("Phase 5 admin API", () => {
       });
     settingPromptIds.push(firstStored.id);
     expect(firstStored.isActive).toBe(true);
+    expect(firstStored.createdBy).toBe("admin");
 
     const reset = await app.inject({
       method: "PUT",
@@ -386,10 +422,15 @@ describe("Phase 5 admin API", () => {
       openapi: "3.0.3",
       components: {
         securitySchemes: {
-          AdminApiKey: {
+          AdminSession: {
+            type: "apiKey",
+            in: "cookie",
+            name: "ca_session"
+          },
+          CsrfToken: {
             type: "apiKey",
             in: "header",
-            name: "x-admin-api-key"
+            name: "x-csrf-token"
           }
         }
       }

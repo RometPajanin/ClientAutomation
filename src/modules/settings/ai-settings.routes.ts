@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 
 import { AppError } from "../../shared/errors.js";
 import { formatAdminValidationIssues } from "../admin/admin.schemas.js";
+import { requireAdminCsrf } from "../auth/auth.hooks.js";
 import { AiSettingsRepository } from "./ai-settings.repository.js";
 import { AiSettingsService } from "./ai-settings.service.js";
 import { updateAiSettingsSchema } from "./ai-settings.schemas.js";
@@ -34,7 +35,7 @@ export const aiSettingsRoutes: FastifyPluginAsync = async (
       schema: {
         tags: ["Admin"],
         summary: "Get the active company AI prompt",
-        security: [{ AdminApiKey: [] }],
+        security: [{ AdminSession: [] }],
         response: { 200: settingsResponseSchema }
       }
     },
@@ -44,10 +45,11 @@ export const aiSettingsRoutes: FastifyPluginAsync = async (
   app.put(
     "/settings/ai",
     {
+      preHandler: requireAdminCsrf,
       schema: {
         tags: ["Admin"],
         summary: "Create and activate a company AI prompt version",
-        security: [{ AdminApiKey: [] }],
+        security: [{ AdminSession: [], CsrfToken: [] }],
         body: {
           type: "object",
           additionalProperties: false,
@@ -78,7 +80,10 @@ export const aiSettingsRoutes: FastifyPluginAsync = async (
         );
       }
 
-      return service.update(parsed.data);
+      return service.update(
+        parsed.data,
+        request.adminSession!.username
+      );
     }
   );
 };

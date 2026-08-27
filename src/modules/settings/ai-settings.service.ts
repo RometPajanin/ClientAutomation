@@ -26,10 +26,13 @@ export class AiSettingsService {
     );
   }
 
-  public async update(input: UpdateAiSettingsInput) {
+  public async update(
+    input: UpdateAiSettingsInput,
+    createdBy: string
+  ) {
     const created = await this.repository.createVersion(
       input.companyPrompt,
-      "admin-api-key"
+      createdBy
     );
 
     return toSettingsResponse(created);

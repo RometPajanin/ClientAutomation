@@ -1,11 +1,35 @@
 import "dotenv/config";
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
+
+const DEMO_ADMIN_PASSWORD_HASH =
+  "scrypt$16384$8$5$qXLKXP6hX9Jq4_Cir9K2-Q$M_BDYdYf7i3cKQmktvYPxh9Tce3RpnVOIgh8Xfh6uX8";
 
 // Web/server environments often represent an optional secret as an empty string.
 // Convert that value to undefined before applying the Zod rules.
 const optionalSecret = z.preprocess(
   (value) => (value === "" ? undefined : value),
   z.string().min(1).optional()
+);
+
+const optionalProxy = z.preprocess(
+  (value) =>
+    value === "" || value === undefined || value === "false"
+      ? false
+      : value === "true"
+        ? true
+      : value,
+  z.union([z.boolean(), z.string().min(1)]).default(false)
+);
+
+const optionalBoolean = z.preprocess(
+  (value) => {
+    if (value === undefined || value === "") return undefined;
+    if (value === "true") return true;
+    if (value === "false") return false;
+    return value;
+  },
+  z.boolean().optional()
 );
 
 // Validate configuration once during startup so later modules can use typed values.
@@ -39,9 +63,57 @@ const envSchema = z.object({
     .string()
     .min(1, "DATABASE_URL is required"),
 
-  ADMIN_API_KEY: z
+  ADMIN_USERNAME: z.string().trim().min(1).max(100).default("admin"),
+
+  ADMIN_PASSWORD_HASH: z
     .string()
-    .min(16, "ADMIN_API_KEY must contain at least 16 characters"),
+    .regex(
+      /^scrypt\$\d+\$\d+\$\d+\$[A-Za-z0-9_-]+\$[A-Za-z0-9_-]+$/,
+      "ADMIN_PASSWORD_HASH must use the documented scrypt format"
+    )
+    .default(DEMO_ADMIN_PASSWORD_HASH),
+
+  SESSION_SECRET: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().min(32).optional()
+  ),
+
+  SESSION_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(300)
+    .max(7 * 24 * 60 * 60)
+    .default(8 * 60 * 60),
+
+  AUTH_RATE_LIMIT_MAX: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .default(5),
+
+  AUTH_RATE_LIMIT_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .default(15 * 60 * 1_000),
+
+  CORS_ALLOWED_ORIGINS: z
+    .string()
+    .default("http://localhost:5173")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean)
+    )
+    .refine((origins) => origins.length > 0, {
+      message: "At least one CORS origin is required"
+    }),
+
+  TRUST_PROXY: optionalProxy,
+
+  REQUIRE_HTTPS: optionalBoolean,
 
   GEMINI_API_KEY: optionalSecret,
 
@@ -97,5 +169,22 @@ if (!parsed.success) {
   throw new Error(`Invalid environment configuration: ${message}`);
 }
 
-export const env = parsed.data;
+if (
+  parsed.data.NODE_ENV === "production" &&
+  !parsed.data.SESSION_SECRET
+) {
+  throw new Error(
+    "Invalid environment configuration: SESSION_SECRET is required in production"
+  );
+}
+
+export const env = {
+  ...parsed.data,
+  SESSION_SECRET:
+    parsed.data.SESSION_SECRET ??
+    randomBytes(32).toString("base64url"),
+  REQUIRE_HTTPS:
+    parsed.data.REQUIRE_HTTPS ??
+    parsed.data.NODE_ENV === "production"
+};
 export type Environment = typeof env;

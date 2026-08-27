@@ -2,6 +2,8 @@ import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import fastifyPlugin from "fastify-plugin";
 
+import { adminSessionCookieName } from "../modules/auth/auth.hooks.js";
+
 // Swagger is registered before feature routes so their schemas enter the document.
 export const swaggerPlugin = fastifyPlugin(
   async (app) => {
@@ -16,10 +18,15 @@ export const swaggerPlugin = fastifyPlugin(
         },
         components: {
           securitySchemes: {
-            AdminApiKey: {
+            AdminSession: {
+              type: "apiKey",
+              in: "cookie",
+              name: adminSessionCookieName()
+            },
+            CsrfToken: {
               type: "apiKey",
               in: "header",
-              name: "x-admin-api-key"
+              name: "x-csrf-token"
             }
           }
         }

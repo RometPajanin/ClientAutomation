@@ -1,8 +1,8 @@
 import type { FastifyPluginAsync } from "fastify";
 
 import { AppError } from "../../shared/errors.js";
+import { requireAdminSession } from "../auth/auth.hooks.js";
 import { aiSettingsRoutes } from "../settings/ai-settings.routes.js";
-import { requireAdminApiKey } from "./admin.auth.js";
 import { AdminInquiryRepository } from "./admin.repository.js";
 import {
   adminInquiryIdParamsSchema,
@@ -240,7 +240,7 @@ export const adminRoutes: FastifyPluginAsync = async (
   app
 ) => {
   // The scoped hook protects inquiry and settings routes registered below it.
-  app.addHook("preHandler", requireAdminApiKey);
+  app.addHook("preHandler", requireAdminSession);
 
   const service = new AdminInquiryService(
     new AdminInquiryRepository(app.prisma)
@@ -252,7 +252,7 @@ export const adminRoutes: FastifyPluginAsync = async (
       schema: {
         tags: ["Admin"],
         summary: "List inquiries in an admin-table format",
-        security: [{ AdminApiKey: [] }],
+        security: [{ AdminSession: [] }],
         querystring: {
           type: "object",
           additionalProperties: false,
@@ -320,7 +320,7 @@ export const adminRoutes: FastifyPluginAsync = async (
       schema: {
         tags: ["Admin"],
         summary: "Get one inquiry with analysis and audit history",
-        security: [{ AdminApiKey: [] }],
+        security: [{ AdminSession: [] }],
         params: {
           type: "object",
           additionalProperties: false,

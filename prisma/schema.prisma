@@ -135,3 +135,14 @@ model AiPromptVersion {
 
   @@index([isActive])
 }
+
+model AdminSession {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  username  String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  @@index([expiresAt])
+}

@@ -123,6 +123,12 @@ function buildWhere(
               contains: query.search,
               mode: "insensitive"
             }
+          },
+          {
+            service: {
+              contains: query.search,
+              mode: "insensitive"
+            }
           }
         ]
       : undefined

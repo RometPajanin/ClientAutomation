@@ -174,15 +174,11 @@ Possible errors:
 
 ## 7. Admin API and interface
 
-All admin endpoints are placed under `/api/v1/admin` and require authentication. The MVP can use an admin API key stored in an environment variable. A production version should use real users and role-based authorization.
+All admin endpoints are placed under `/api/v1/admin` and require an active database-backed administrator session. The demo intentionally publishes one account (`admin / demo-admin-password`) so the flow demonstrates authentication mechanics rather than real access restriction.
 
-The client sends the configured key in the following header:
+Login sets a signed opaque `HttpOnly`, `SameSite=Strict` cookie. The frontend uses credentialed fetch requests, so JavaScript never reads or stores the session token. Production cookies are `Secure` and use the `__Host-` prefix.
 
-```http
-x-admin-api-key: replace-with-your-admin-api-key
-```
-
-Missing and incorrect keys receive `401 Unauthorized`. The key is compared using a timing-safe comparison and is never written to logs. The API key must contain at least 16 characters.
+The password is configured only as an scrypt hash. Missing, invalid, expired, and revoked sessions receive `401 Unauthorized`. Authenticated state changes additionally require the per-session `x-csrf-token` returned by login/session restoration.
 
 ### `GET /api/v1/admin/inquiries`
 
@@ -311,7 +307,7 @@ The admin UI presents this setting as a multiline text area with Save and Reset 
 
 ### API documentation
 
-Interactive Swagger documentation is available at `GET /documentation`. The generated OpenAPI JSON is available at `GET /documentation/json`. Swagger declares `x-admin-api-key` as the `AdminApiKey` security scheme so authenticated requests can be tried from the documentation page.
+Interactive Swagger documentation is available at `GET /documentation`. The generated OpenAPI JSON is available at `GET /documentation/json`. Swagger declares the administrator cookie and CSRF header security schemes.
 
 ### Recommended later endpoints
 
@@ -534,7 +530,7 @@ tests/
 ## 13. Security and data protection
 
 - Require authentication for every admin endpoint.
-- Keep `GEMINI_API_KEY`, the admin API key, and database credentials in server-side environment variables.
+- Keep `GEMINI_API_KEY`, the session-signing secret, and database credentials in server-side secret storage.
 - Never expose the Gemini key to the browser or return it through an API response.
 - Do not log full messages, email addresses, phone numbers, prompts, or model responses.
 - Do not allow secrets, credentials, or customer personal data in the company prompt.
@@ -644,7 +640,7 @@ Result: every analyzed inquiry is ready for human review with urgency, a short a
 
 ### Phase 5 — Admin API
 
-- Add admin API-key authentication.
+- Add administrator authentication.
 - Implement the table-ready list endpoint with filters, sorting, and pagination.
 - Implement the detail endpoint.
 - Implement the read and update endpoints for the versioned company prompt.
@@ -652,11 +648,11 @@ Result: every analyzed inquiry is ready for human review with urgency, a short a
 - Document endpoints with Swagger.
 
 - **Status: completed on 2026-08-27.**
-- Protected the complete `/api/v1/admin` scope with the `x-admin-api-key` header and a timing-safe key comparison.
+- Protected the complete `/api/v1/admin` scope. The original API-key mechanism was subsequently replaced by the Phase 7 cookie-session flow.
 - Added table-ready list output with bounded pagination, explicit sortable fields, combined filters, case-insensitive search, and newest-first defaults.
 - Added a detail response containing the original submission, structured AI analysis, reply draft, required human-review state, duplicate reference, prompt version, and audit history without exposing the internal fingerprint.
 - Added company-prompt read and update endpoints. Each save trims the prompt and creates a new immutable version in a serializable transaction; an empty prompt acts as Reset.
-- Added Swagger UI at `/documentation` and OpenAPI JSON at `/documentation/json` with an admin API-key security scheme.
+- Added Swagger UI at `/documentation` and OpenAPI JSON at `/documentation/json`; its security schemes now describe cookie sessions and CSRF.
 - Added Phase 5 integration tests for authentication, filters, pagination, sorting, detail retrieval, missing records, prompt history, and OpenAPI publication.
 
 Result: an admin application can securely display organized AI results and manage the business-specific prompt used in future AI requests.
@@ -666,17 +662,28 @@ Result: an admin application can securely display organized AI results and manag
 - Add unit and integration tests.
 - Add Docker Compose and `.env.example`.
 - Add seed data containing synthetic inquiries.
-- Document API-key setup, startup, migrations, and API usage.
+- Document administrator-session setup, startup, migrations, and API usage.
 - Verify type checking, tests, and the production build.
 
 - **Requested setup subset completed on 2026-08-27.**
 - Hardened the existing PostgreSQL Docker Compose service by binding it to localhost and adding a startup grace period while preserving the existing persistent volume identity.
 - Completed `.env.example` with every supported setting, including Gemini timeout and retry controls, without placing real secrets in source control.
-- Added `README.md` with exact PowerShell commands for admin and Gemini API-key setup, dependency installation, Docker startup, Prisma Client generation, migration deployment and development, API calls, Swagger, verification, and compiled startup.
+- Added `README.md` with exact setup for administrator sessions and the Gemini API key, dependency installation, Docker startup, Prisma Client generation, migration deployment and development, API calls, Swagger, verification, and compiled startup.
 - Verified the Docker Compose configuration, migration state, type checking, automated tests, and production build.
 - Seed data remains a separate Phase 6 task and is not included in this requested subset.
 
 Result: the backend can be started locally from one documented workflow and is ready for demonstration.
+
+### Phase 7 — Browser session and transport hardening
+
+- **Status: completed on 2026-08-27.**
+- Replaced the browser-held API key with scrypt-verified login and a database-backed, revocable opaque session.
+- Added signed `HttpOnly`, `SameSite=Strict` cookies, with `Secure` and `__Host-` enforcement in production.
+- Added per-session CSRF tokens to settings updates and logout, credentialed exact-origin CORS, login throttling, session restoration, and server-side revocation.
+- Added Helmet security headers, API CSP, `Cache-Control: no-store` for authenticated responses, production HTTPS rejection, narrow proxy-trust configuration, and HTTPS-only HSTS.
+- Added integration tests covering credential failures, cookie properties, CSRF rejection, session restoration/revocation, CORS, headers, and existing admin behavior.
+
+Result: the public-credential demo now demonstrates a conventional secure browser-session flow while clearly remaining unsuitable as real identity-based access control.
 
 ## 16. MVP completion criteria
 

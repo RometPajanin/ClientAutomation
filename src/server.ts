@@ -4,13 +4,8 @@ import { env } from "./config/env.js";
 const app = buildApp();
 
 // Graceful shutdown runs Fastify hooks, including the Prisma disconnection hook.
-async function shutdown(
-  signal: string
-): Promise<void> {
-  app.log.info(
-    { signal },
-    "Shutting down server"
-  );
+async function shutdown(signal: string): Promise<void> {
+  app.log.info({ signal }, "Shutting down server");
 
   await app.close();
 }
@@ -30,10 +25,7 @@ try {
     port: env.PORT
   });
 } catch (error) {
-  app.log.fatal(
-    { err: error },
-    "Server failed to start"
-  );
+  app.log.fatal({ err: error }, "Server failed to start");
 
   await app.close();
   process.exitCode = 1;

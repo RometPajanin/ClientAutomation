@@ -89,6 +89,40 @@ describe("POST /api/v1/inquiries", () => {
     expect(stored?.events[0]?.type).toBe("RECEIVED");
   });
 
+  it("accepts legacy source metadata and null optional fields", async () => {
+    const sourceReference = `${testPrefix}-legacy-client`;
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/inquiries",
+      payload: createPayload({
+        name: null,
+        phone: null,
+        service: null,
+        source: "legacy-web-form",
+        sourceReference
+      })
+    });
+
+    expect(response.statusCode).toBe(202);
+
+    const stored = await app.prisma.inquiry.findUnique({
+      where: { sourceReference },
+      select: {
+        name: true,
+        phone: true,
+        service: true,
+        source: true
+      }
+    });
+
+    expect(stored).toEqual({
+      name: null,
+      phone: null,
+      service: null,
+      source: "WEB_FORM"
+    });
+  });
+
   it("returns the existing inquiry for an idempotent replay", async () => {
     const sourceReference = `${testPrefix}-idempotent`;
     const payload = createPayload({ sourceReference });
