@@ -5,6 +5,7 @@ import {
   normalizeInquiry
 } from "../src/modules/inquiries/inquiry.normalization.js";
 
+// These unit tests exercise pure logic and do not connect to PostgreSQL.
 describe("inquiry normalization", () => {
   it("normalizes display fields and contact information", () => {
     const normalized = normalizeInquiry({

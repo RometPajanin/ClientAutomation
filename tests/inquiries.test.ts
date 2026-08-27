@@ -14,6 +14,7 @@ import { env } from "../src/config/env.js";
 
 const testPrefix = `phase-2-test-${randomUUID()}`;
 
+// Every stored test record receives a unique prefix so cleanup is targeted.
 function createPayload(
   overrides: Record<string, unknown> = {}
 ): Record<string, unknown> {
@@ -36,6 +37,7 @@ describe("POST /api/v1/inquiries", () => {
     await app.ready();
   });
 
+  // Remove only records created by this suite and let relation cascades clean events.
   afterAll(async () => {
     await app.prisma.inquiry.deleteMany({
       where: {
@@ -220,6 +222,7 @@ describe("POST /api/v1/inquiries", () => {
   });
 
   it("rate limits repeated submissions from one client", async () => {
+    // A separate app has an isolated in-memory limiter, keeping other tests independent.
     const rateLimitedApp = buildApp({ logger: false });
     await rateLimitedApp.ready();
 

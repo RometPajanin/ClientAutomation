@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+// HTML forms commonly submit optional empty fields as "" instead of omitting them.
 function emptyStringToUndefined(value: unknown): unknown {
   return typeof value === "string" && value.trim() === ""
     ? undefined
@@ -13,6 +14,7 @@ function optionalTrimmedString(maxLength: number) {
   );
 }
 
+// Field-specific schemas both validate and perform safe, local transformations.
 const optionalEmail = z.preprocess(
   emptyStringToUndefined,
   z
@@ -38,6 +40,7 @@ const optionalPhone = z.preprocess(
     .optional()
 );
 
+// Strict mode prevents misspelled or unexpected fields from silently entering storage.
 export const createInquirySchema = z
   .object({
     name: optionalTrimmedString(120),
@@ -53,6 +56,7 @@ export const createInquirySchema = z
     sourceReference: optionalTrimmedString(200)
   })
   .strict()
+  // Contact is a cross-field rule: either email or phone is acceptable.
   .superRefine((value, context) => {
     if (!value.email && !value.phone) {
       context.addIssue({
@@ -67,6 +71,7 @@ export type CreateInquiryInput = z.output<
   typeof createInquirySchema
 >;
 
+// Return only safe validation metadata, never the submitted field values themselves.
 export function formatValidationIssues(
   error: z.ZodError
 ): Array<{ path: string; code: string; message: string }> {

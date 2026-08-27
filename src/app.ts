@@ -10,6 +10,8 @@ export interface BuildAppOptions {
   logger?: boolean;
 }
 
+// Constructing the application separately from starting the server lets tests
+// inject requests without opening a real network port.
 export function buildApp(
   options: BuildAppOptions = {}
 ): FastifyInstance {
@@ -22,6 +24,7 @@ export function buildApp(
           }
   });
 
+  // Register shared infrastructure before feature routes that depend on it.
   registerErrorHandler(app);
 
   app.register(databasePlugin);

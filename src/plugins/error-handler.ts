@@ -2,6 +2,8 @@ import type { FastifyInstance } from "fastify";
 
 import { AppError } from "../shared/errors.js";
 
+// Fastify error callbacks receive unknown values, so small type guards keep
+// the handler safe without trusting arbitrary thrown objects.
 function hasValidationErrors(
   error: unknown
 ): error is { validation: unknown } {
@@ -26,6 +28,7 @@ function hasHttpStatusCode(
 export function registerErrorHandler(
   app: FastifyInstance
 ): void {
+  // Return the same response shape for every unknown route.
   app.setNotFoundHandler((request, reply) => {
     return reply.status(404).send({
       error: {
@@ -37,6 +40,7 @@ export function registerErrorHandler(
   });
 
   app.setErrorHandler((error, request, reply) => {
+    // Expected domain errors may safely expose their prepared code and message.
     if (error instanceof AppError) {
       return reply.status(error.statusCode).send({
         error: {
@@ -87,6 +91,7 @@ export function registerErrorHandler(
       });
     }
 
+    // Unexpected details stay in server logs and are never exposed to the caller.
     request.log.error(
       { err: error },
       "Unhandled request error"

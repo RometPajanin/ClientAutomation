@@ -12,6 +12,7 @@ import { buildApp } from "../src/app.js";
 describe("health endpoints", () => {
   let app: FastifyInstance;
 
+  // One application instance is shared because these tests only read health state.
   beforeAll(async () => {
     app = buildApp({
       logger: false

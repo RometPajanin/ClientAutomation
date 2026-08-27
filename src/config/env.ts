@@ -1,11 +1,14 @@
 import "dotenv/config";
 import { z } from "zod";
 
+// Web/server environments often represent an optional secret as an empty string.
+// Convert that value to undefined before applying the Zod rules.
 const optionalSecret = z.preprocess(
   (value) => (value === "" ? undefined : value),
   z.string().min(1).optional()
 );
 
+// Validate configuration once during startup so later modules can use typed values.
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
@@ -70,6 +73,7 @@ const envSchema = z.object({
 
 const parsed = envSchema.safeParse(process.env);
 
+// Fail fast instead of allowing a missing setting to cause a less clear runtime error.
 if (!parsed.success) {
   const message = parsed.error.issues
     .map((issue) => `${issue.path.join(".")}: ${issue.message}`)

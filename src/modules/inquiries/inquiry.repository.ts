@@ -33,6 +33,7 @@ export class InquiryRepository {
     });
   }
 
+  // Duplicate candidates must be recent original inquiries, not earlier duplicates.
   public async findRecentOriginalByFingerprint(
     fingerprint: string,
     createdAfter: Date
@@ -53,6 +54,7 @@ export class InquiryRepository {
   ): Promise<StoredInquirySummary> {
     const isDuplicate = input.duplicateOfId !== undefined;
 
+    // Prisma nested writes store the inquiry and audit events atomically.
     return this.prisma.inquiry.create({
       data: {
         ...input.inquiry,

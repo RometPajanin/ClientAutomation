@@ -7,6 +7,7 @@ import {
 import { InquiryRepository } from "./inquiry.repository.js";
 import type { CreateInquiryResult } from "./inquiry.types.js";
 
+// Avoid depending on Prisma's concrete error class for one stable error code.
 function isUniqueConstraintError(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -26,6 +27,7 @@ export class InquiryService {
   ): Promise<CreateInquiryResult> {
     const inquiry = normalizeInquiry(input);
 
+    // An idempotency key takes priority: a retried delivery returns its first result.
     if (inquiry.sourceReference) {
       const existing =
         await this.repository.findBySourceReference(
@@ -40,6 +42,7 @@ export class InquiryService {
       }
     }
 
+    // Only non-replayed requests enter the time-bounded duplicate check.
     const fingerprint = createInquiryFingerprint(inquiry);
     const duplicateWindowStart = new Date(
       Date.now() -
@@ -63,6 +66,8 @@ export class InquiryService {
         idempotentReplay: false
       };
     } catch (error) {
+      // Concurrent requests may pass the first lookup together. The database
+      // unique constraint decides the winner and this branch returns that record.
       if (
         inquiry.sourceReference &&
         isUniqueConstraintError(error)

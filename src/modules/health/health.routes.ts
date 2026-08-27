@@ -3,6 +3,7 @@ import type { FastifyPluginAsync, FastifyReply } from "fastify";
 export const healthRoutes: FastifyPluginAsync = async (
   app
 ) => {
+  // Liveness only confirms that the Node.js process can answer requests.
   app.get("/health/live", async () => {
     return {
       status: "ok",
@@ -11,6 +12,7 @@ export const healthRoutes: FastifyPluginAsync = async (
     };
   });
 
+  // Readiness also checks the external dependency required to serve real traffic.
   async function checkReadiness(
     reply: FastifyReply
   ): Promise<unknown> {

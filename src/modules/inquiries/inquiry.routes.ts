@@ -16,6 +16,7 @@ const MAX_REQUEST_BODY_BYTES = 20_000;
 export const inquiryRoutes: FastifyPluginAsync = async (
   app
 ) => {
+  // Rate limiting is scoped to public inquiry routes rather than health/admin APIs.
   await app.register(rateLimit, {
     global: false,
     max: env.INQUIRY_RATE_LIMIT_MAX,
@@ -45,6 +46,7 @@ export const inquiryRoutes: FastifyPluginAsync = async (
       }
     },
     async (request, reply) => {
+      // request.body is untrusted until the strict Zod schema accepts it.
       const parsed = createInquirySchema.safeParse(
         request.body
       );
@@ -59,6 +61,9 @@ export const inquiryRoutes: FastifyPluginAsync = async (
       }
 
       const result = await service.createInquiry(parsed.data);
+
+      // Keep the public response small; internal duplicate links and audit data
+      // remain available only through the future authenticated admin API.
       const message = result.idempotentReplay
         ? "Inquiry already received"
         : result.status === "DUPLICATE"

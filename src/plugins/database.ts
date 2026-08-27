@@ -10,6 +10,7 @@ declare module "fastify" {
   }
 }
 
+// Create one Prisma client for the Fastify application and expose it as app.prisma.
 export const databasePlugin = fastifyPlugin(
   async (app) => {
     const adapter = new PrismaPg({
@@ -24,6 +25,7 @@ export const databasePlugin = fastifyPlugin(
 
     app.decorate("prisma", prisma);
 
+    // Closing the database pool during shutdown prevents hanging Node processes.
     app.addHook("onClose", async () => {
       await prisma.$disconnect();
     });

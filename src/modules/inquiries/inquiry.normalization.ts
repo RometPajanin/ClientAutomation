@@ -12,6 +12,7 @@ export interface NormalizedInquiry {
   sourceReference?: string;
 }
 
+// Unicode and whitespace normalization makes stored display values predictable.
 function normalizeDisplayText(value: string): string {
   return value.normalize("NFKC").replace(/\s+/g, " ").trim();
 }
@@ -21,6 +22,8 @@ function normalizePhone(value: string): string {
   return value.trim().startsWith("+") ? `+${digits}` : digits;
 }
 
+// Comparison normalization is more aggressive because casing and spacing should
+// not prevent duplicate detection.
 function normalizeMessageForComparison(value: string): string {
   return value
     .normalize("NFKC")
@@ -52,6 +55,8 @@ export function normalizeInquiry(
   };
 }
 
+// The fingerprint is deterministic and free; it detects equivalent normalized
+// submissions without sending customer data to another service.
 export function createInquiryFingerprint(
   inquiry: NormalizedInquiry
 ): string {

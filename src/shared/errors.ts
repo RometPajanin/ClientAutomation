@@ -1,3 +1,5 @@
+// Application code throws AppError for expected failures that should become
+// stable, client-safe HTTP responses in the global error handler.
 export class AppError extends Error {
   public readonly statusCode: number;
   public readonly code: string;
