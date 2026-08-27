@@ -1,8 +1,14 @@
 import {
-  GeminiAnalysisProvider
-} from "../src/modules/analysis/gemini.provider.js";
+  createConfiguredAnalysisProvider
+} from "../src/modules/analysis/analysis.factory.js";
 
-const provider = new GeminiAnalysisProvider();
+const provider = createConfiguredAnalysisProvider();
+
+if (!provider) {
+  throw new Error(
+    "Set GEMINI_API_KEY in .env before running the Gemini smoke test"
+  );
+}
 
 const result = await provider.analyze({
   analysisDate: new Date().toISOString().slice(0, 10),

@@ -41,7 +41,9 @@ export const inquiryRoutes: FastifyPluginAsync<
   });
 
   const repository = new InquiryRepository(app.prisma);
-  const service = new InquiryService(repository);
+  const service = new InquiryService(repository, {
+    duplicateWindowHours: env.DUPLICATE_WINDOW_HOURS
+  });
   const analysisRunner = options.analysisProvider
     ? new InProcessAnalysisRunner(
         new AnalysisService(

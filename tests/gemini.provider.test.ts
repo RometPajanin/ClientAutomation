@@ -102,6 +102,9 @@ describe("GeminiAnalysisProvider", () => {
     expectedCode
   ) => {
     const provider = new GeminiAnalysisProvider({
+      model: "test-model",
+      timeoutMs: 4_000,
+      maxRetries: 1,
       createInteraction: async () => response
     });
 
@@ -125,6 +128,9 @@ describe("GeminiAnalysisProvider", () => {
     "maps HTTP %i after retries to %s",
     async (status, expectedCode, retryable) => {
       const provider = new GeminiAnalysisProvider({
+        model: "test-model",
+        timeoutMs: 4_000,
+        maxRetries: 1,
         createInteraction: async () => {
           throw Object.assign(new Error("SDK detail"), {
             status

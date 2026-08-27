@@ -1,8 +1,12 @@
 {
   "name": "clientautomation",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Demo backend for AI-assisted customer inquiry triage and human-reviewed reply drafting.",
+  "private": true,
+  "main": "dist/server.js",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "test": "vitest run",
     "dev": "tsx watch src/server.ts",
@@ -14,6 +18,11 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
+    "db:start": "docker compose up -d --wait db",
+    "db:stop": "docker compose down",
+    "db:status": "docker compose ps",
+    "ai:smoke": "tsx scripts/gemini-smoke.ts",
+    "check": "npm run typecheck && npm test && npm run build",
     "postinstall": "prisma generate"
   },
   "keywords": [],

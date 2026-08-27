@@ -3,8 +3,10 @@ import cors from "@fastify/cors";
 
 import { env } from "./config/env.js";
 import { adminRoutes } from "./modules/admin/admin.routes.js";
+import {
+  createConfiguredAnalysisProvider
+} from "./modules/analysis/analysis.factory.js";
 import type { AnalysisProvider } from "./modules/analysis/analysis.provider.js";
-import { GeminiAnalysisProvider } from "./modules/analysis/gemini.provider.js";
 import { adminAuthPlugin } from "./modules/auth/auth.plugin.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
 import { healthRoutes } from "./modules/health/health.routes.js";
@@ -17,15 +19,6 @@ import { swaggerPlugin } from "./plugins/swagger.js";
 export interface BuildAppOptions {
   logger?: boolean;
   analysisProvider?: AnalysisProvider | null;
-}
-
-function createDefaultAnalysisProvider(): AnalysisProvider | null {
-  // Tests must opt into an injected fake and must never spend real API quota.
-  if (env.NODE_ENV === "test" || !env.GEMINI_API_KEY) {
-    return null;
-  }
-
-  return new GeminiAnalysisProvider();
 }
 
 // Constructing the application separately from starting the server lets tests
@@ -45,7 +38,7 @@ export function buildApp(
 
   const analysisProvider =
     options.analysisProvider === undefined
-      ? createDefaultAnalysisProvider()
+      ? createConfiguredAnalysisProvider()
       : options.analysisProvider;
 
   // Register shared infrastructure before feature routes that depend on it.

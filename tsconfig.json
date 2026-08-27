@@ -14,6 +14,7 @@
   },
   "include": [
     "src/**/*.ts",
+    "scripts/**/*.ts",
     "tests/**/*.ts",
     "prisma.config.ts",
     "vitest.config.ts"

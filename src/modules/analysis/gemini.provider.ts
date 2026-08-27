@@ -1,7 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 
-import { env } from "../../config/env.js";
 import {
   analysisOutputJsonSchema,
   analysisOutputSchema,
@@ -55,9 +54,9 @@ type CreateInteraction = (
 
 export interface GeminiAnalysisProviderOptions {
   apiKey?: string;
-  model?: string;
-  timeoutMs?: number;
-  maxRetries?: number;
+  model: string;
+  timeoutMs: number;
+  maxRetries: number;
   // Tests inject this boundary so they never contact the real Gemini service.
   createInteraction?: CreateInteraction;
 }
@@ -139,20 +138,18 @@ export class GeminiAnalysisProvider
   private readonly createInteraction: CreateInteraction;
 
   public constructor(
-    options: GeminiAnalysisProviderOptions = {}
+    options: GeminiAnalysisProviderOptions
   ) {
-    this.model = options.model ?? env.GEMINI_MODEL;
-    this.timeoutMs =
-      options.timeoutMs ?? env.GEMINI_TIMEOUT_MS;
-    this.maxRetries =
-      options.maxRetries ?? env.GEMINI_MAX_RETRIES;
+    this.model = options.model;
+    this.timeoutMs = options.timeoutMs;
+    this.maxRetries = options.maxRetries;
 
     if (options.createInteraction) {
       this.createInteraction = options.createInteraction;
       return;
     }
 
-    const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
+    const apiKey = options.apiKey;
 
     if (!apiKey) {
       throw new Error(

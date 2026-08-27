@@ -1,4 +1,3 @@
-import { env } from "../../config/env.js";
 import type { CreateInquiryInput } from "./inquiry.schemas.js";
 import {
   createInquiryFingerprint,
@@ -19,7 +18,11 @@ function isUniqueConstraintError(error: unknown): boolean {
 
 export class InquiryService {
   public constructor(
-    private readonly repository: InquiryRepository
+    private readonly repository: InquiryRepository,
+    private readonly options: {
+      duplicateWindowHours: number;
+      now?: () => Date;
+    }
   ) {}
 
   public async createInquiry(
@@ -44,9 +47,10 @@ export class InquiryService {
 
     // Only non-replayed requests enter the time-bounded duplicate check.
     const fingerprint = createInquiryFingerprint(inquiry);
+    const now = this.options.now?.() ?? new Date();
     const duplicateWindowStart = new Date(
-      Date.now() -
-        env.DUPLICATE_WINDOW_HOURS * 60 * 60 * 1_000
+      now.getTime() -
+        this.options.duplicateWindowHours * 60 * 60 * 1_000
     );
     const duplicate =
       await this.repository.findRecentOriginalByFingerprint(

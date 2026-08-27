@@ -1,258 +1,175 @@
 # Customer Inquiry Automation Backend
 
-This backend accepts web-form inquiries, stores them in PostgreSQL, analyzes them with Gemini, prepares optional reply drafts for human review, and exposes the results through an authenticated admin API.
+A demonstration Fastify API that accepts customer inquiries, stores them in
+PostgreSQL, uses Gemini to classify and summarize them, and prepares an optional
+reply draft for an authenticated administrator to review.
 
-No response is sent automatically. Every inquiry remains subject to human review.
+The application **never sends a reply automatically**. AI output is validated by
+the backend and every resulting action remains subject to human review.
 
-## Prerequisites
+> Demo notice: use synthetic data only. Customer fields are stored as plaintext
+> and inquiry content is sent to the configured AI provider.
 
-- Node.js 24 or newer
-- npm
-- Docker Desktop with Docker Compose
-- A Gemini API key for AI analysis
+## Application flow
 
-The application runs locally with Node.js. Docker Compose runs only PostgreSQL, so source-code changes remain easy to test during development.
-
-## 1. Install dependencies
-
-From PowerShell in the project directory:
-
-```powershell
-cd D:\clientAutomation
-npm install
+```mermaid
+flowchart LR
+    A[POST inquiry] --> B[Validate and normalize]
+    B --> C[Detect replay or duplicate]
+    C --> D[(PostgreSQL + audit event)]
+    D --> E[Return 202 Accepted]
+    E --> F[Claim asynchronous analysis]
+    F --> G[Gemini structured output]
+    G --> H[Validate and store result]
+    H --> I[Human reviews in admin API]
 ```
 
-## 2. Create the environment file
+1. `POST /api/v1/inquiries` strictly validates and normalizes the request.
+2. The service checks an optional source reference for idempotency and compares
+   a normalized fingerprint with recent inquiries for duplicate detection.
+3. The inquiry and its audit event are stored transactionally, then the API
+   returns `202 Accepted`.
+4. A same-process runner claims the inquiry and sends it to the configured
+   analysis provider with the active versioned company prompt.
+5. The provider response must satisfy the local Zod schema before classifications,
+   extracted facts, risk flags, and an optional reply draft are stored.
+6. Authenticated admin endpoints expose the result for human review.
 
-Copy the committed template to the untracked local `.env` file:
+## Project organization
+
+```text
+src/
+  app.ts                    composition root and plugin registration
+  server.ts                 process startup and graceful shutdown
+  config/                   validated environment configuration
+  modules/
+    inquiries/              public intake, normalization, duplicate detection
+    analysis/               provider interface, Gemini adapter, workflow, schema
+    auth/                   admin login, sessions, cookies, and CSRF
+    admin/                  inquiry list/detail read models
+    settings/               immutable company-prompt versions
+    health/                 liveness and database readiness
+  plugins/                  database, security, Swagger, and error handling
+  shared/                   shared application errors
+prisma/                     schema and committed migrations
+tests/                      integration, workflow, provider, and schema tests
+```
+
+Routes handle HTTP concerns, services contain application rules, and repositories
+own Prisma queries. `src/app.ts` is the composition root, so concrete dependencies
+are selected at the application edge rather than inside domain workflows.
+
+## Requirements
+
+- Node.js 24
+- npm
+- Docker Desktop or another Docker installation with Compose
+- Optional: a Gemini API key to enable analysis
+
+Docker is used only for PostgreSQL. The backend runs directly in Node.js for a
+shorter development feedback loop.
+
+## Quick start
+
+From the repository root:
 
 ```powershell
 Copy-Item .env.example .env
+npm install
+npm run db:start
+npm run db:deploy
+npm run dev
 ```
 
-Do not commit `.env`. It contains local credentials and is already excluded by `.gitignore`.
+On macOS/Linux, replace the first command with:
 
-### Demo administrator
+```bash
+cp .env.example .env
+```
 
-The intentionally public demonstration credentials are:
+`npm run db:start` automatically pulls `postgres:17-alpine` when necessary,
+creates the named data volume, starts PostgreSQL on `127.0.0.1:5433`, and waits
+for its health check. `npm run db:stop` stops it without deleting its data.
+
+The API is then available at:
+
+- API: `http://localhost:3000`
+- Swagger UI: `http://localhost:3000/documentation`
+- OpenAPI JSON: `http://localhost:3000/documentation/json`
+- Liveness: `http://localhost:3000/health/live`
+- Database readiness: `http://localhost:3000/health/ready`
+
+The committed demo administrator is:
 
 ```text
 Username: admin
 Password: demo-admin-password
 ```
 
-The server configuration contains an scrypt password hash, not the plaintext password. A successful login creates an opaque database-backed session and a signed `HttpOnly`, `SameSite=Strict` cookie. The production cookie also uses `Secure` and the `__Host-` prefix. Settings updates and logout require the CSRF token returned by the login/session endpoint.
+Set `GEMINI_API_KEY` in `.env` to enable AI analysis. Without a key, the API still
+accepts and stores inquiries, which remain in `RECEIVED` status.
 
-Set `SESSION_SECRET` to a new random 32+ character secret for any deployed environment. Production startup rejects a missing secret. These public demo credentials intentionally provide no real access control; replace them with individual identity-provider accounts and MFA for a real application.
+## AI model and provider changes
 
-### Gemini API key
-
-1. Open [Google AI Studio](https://ai.google.dev/aistudio).
-2. Create or select an API key.
-3. Copy it into `.env`:
+Changing the Gemini model requires no code change:
 
 ```dotenv
-GEMINI_API_KEY=your-gemini-api-key
+GEMINI_MODEL=gemini-3.1-flash-lite
 ```
 
-Consult Google's current [Gemini API-key guide](https://ai.google.dev/gemini-api/docs/api-key) and [pricing page](https://ai.google.dev/gemini-api/docs/pricing) before use. Free-tier model availability and limits can change.
+Provider-specific code is isolated in `gemini.provider.ts`. The rest of the
+workflow depends on the `AnalysisProvider` interface. To use another AI vendor:
 
-The server can start with an empty `GEMINI_API_KEY`, but inquiries will only be stored and will remain `RECEIVED`; AI analysis is disabled until a key is configured.
+1. Implement `AnalysisProvider` in a new adapter.
+2. Return validated `AnalysisOutput` values.
+3. Select the adapter in `analysis.factory.ts`.
 
-### Environment variables
+The company-specific prompt is separately editable through the admin settings
+endpoint. Each update creates an immutable version, and every analysis records
+which version it used.
 
-| Variable | Required | Default/example | Purpose |
+## Endpoints
+
+| Method | Path | Access | Purpose |
 | --- | --- | --- | --- |
-| `NODE_ENV` | No | `development` | Selects development, test, or production behavior. |
-| `HOST` | No | `0.0.0.0` | Address used by Fastify. |
-| `PORT` | No | `3000` | HTTP port. |
-| `LOG_LEVEL` | No | `info` | Fastify/Pino log level. |
-| `DATABASE_URL` | Yes | Compose URL in `.env.example` | PostgreSQL connection used by Prisma. |
-| `ADMIN_USERNAME` | No | `admin` | Demo administrator username. |
-| `ADMIN_PASSWORD_HASH` | No | Demo scrypt hash | Password verifier; never configure a plaintext password. |
-| `SESSION_SECRET` | Production | Random 32+ characters | Signs cookies and derives CSRF tokens. |
-| `SESSION_TTL_SECONDS` | No | `28800` | Absolute administrator session lifetime. |
-| `AUTH_RATE_LIMIT_MAX` | No | `5` | Login attempts allowed per auth rate-limit window. |
-| `AUTH_RATE_LIMIT_WINDOW_MS` | No | `900000` | Login rate-limit window. |
-| `CORS_ALLOWED_ORIGINS` | No | `http://localhost:5173` | Exact comma-separated credentialed browser origins. |
-| `TRUST_PROXY` | No | `false` | Exact trusted proxy IP/CIDR or hop configuration. |
-| `REQUIRE_HTTPS` | No | Production defaults to `true` | Reject requests Fastify does not identify as HTTPS. |
-| `GEMINI_API_KEY` | For AI | Empty | Enables Gemini inquiry analysis. |
-| `GEMINI_MODEL` | No | `gemini-3.1-flash-lite` | Gemini model identifier. |
-| `GEMINI_TIMEOUT_MS` | No | `20000` | Maximum duration of one provider attempt. |
-| `GEMINI_MAX_RETRIES` | No | `2` | Retry count after the initial Gemini request. |
-| `INQUIRY_RATE_LIMIT_MAX` | No | `10` | Public requests allowed per rate-limit window. |
-| `INQUIRY_RATE_LIMIT_WINDOW_MS` | No | `60000` | Public rate-limit window in milliseconds. |
-| `DUPLICATE_WINDOW_HOURS` | No | `24` | Recent period used by duplicate detection. |
+| `GET` | `/health/live` | Public | Process liveness |
+| `GET` | `/health/ready` | Public | PostgreSQL readiness |
+| `GET` | `/health` | Public | Alias of readiness |
+| `POST` | `/api/v1/inquiries` | Public, rate-limited | Submit an inquiry |
+| `POST` | `/api/v1/auth/login` | Public, rate-limited | Create an admin session |
+| `GET` | `/api/v1/auth/session` | Session cookie | Restore the admin session and CSRF token |
+| `POST` | `/api/v1/auth/logout` | Session + CSRF | Revoke the session |
+| `GET` | `/api/v1/admin/inquiries` | Session cookie | Filtered, sorted inquiry list |
+| `GET` | `/api/v1/admin/inquiries/:id` | Session cookie | Inquiry, analysis, duplicate, and audit detail |
+| `GET` | `/api/v1/admin/settings/ai` | Session cookie | Read the active company prompt |
+| `PUT` | `/api/v1/admin/settings/ai` | Session + CSRF | Create and activate a prompt version |
 
-## 3. Start PostgreSQL
+Swagger contains the request/response schemas and query parameters. After login,
+browser clients send the signed `HttpOnly` cookie automatically. State-changing
+admin requests also send the returned CSRF token in `x-csrf-token`.
 
-```powershell
-docker compose up -d db
-docker compose ps
-```
+## Useful commands
 
-PostgreSQL listens only on `127.0.0.1:5433`. Its data is retained in the Compose-managed `postgres_data` volume.
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the TypeScript development server with reload |
+| `npm run db:start` | Create/start PostgreSQL and wait until healthy |
+| `npm run db:status` | Show the Compose database status |
+| `npm run db:stop` | Stop PostgreSQL while retaining its volume |
+| `npm run db:deploy` | Apply all committed Prisma migrations |
+| `npm run db:migrate -- --name <name>` | Create a development migration |
+| `npm run db:studio` | Open Prisma Studio |
+| `npm run ai:smoke` | Make one real Gemini request using `.env` configuration |
+| `npm run check` | Type-check, run all tests, and build |
+| `npm start` | Run the compiled server after `npm run build` |
 
-To stop the database without deleting its data:
+## Deliberate demo limitations
 
-```powershell
-docker compose down
-```
-
-## 4. Generate Prisma Client and apply migrations
-
-Generate the typed database client:
-
-```powershell
-npm run prisma:generate
-```
-
-Apply all committed migrations to a fresh or existing demo database:
-
-```powershell
-npm run db:deploy
-```
-
-Check migration status:
-
-```powershell
-npx prisma migrate status
-```
-
-When intentionally changing `prisma/schema.prisma` during development, create a new migration with a descriptive name:
-
-```powershell
-npm run db:migrate -- --name describe_the_change
-```
-
-Do not use `prisma migrate reset` unless all local database data can be deleted. Reset drops and rebuilds the development schema.
-
-## 5. Start the development server
-
-```powershell
-npm run dev
-```
-
-Useful URLs:
-
-- API: `http://localhost:3000`
-- Liveness: `http://localhost:3000/health/live`
-- Database readiness: `http://localhost:3000/health/ready`
-- Swagger UI: `http://localhost:3000/documentation`
-- OpenAPI JSON: `http://localhost:3000/documentation/json`
-
-## 6. API usage
-
-### Submit a web-form inquiry
-
-```http
-POST http://localhost:3000/api/v1/inquiries
-Content-Type: application/json
-```
-
-```json
-{
-  "name": "Mari Maasikas",
-  "email": "mari@example.com",
-  "phone": "+37255555555",
-  "service": "Website development",
-  "message": "We need a new company website before the end of next month.",
-  "consentToStore": true,
-  "sourceReference": "webform-demo-001"
-}
-```
-
-The endpoint returns `202 Accepted`. A new non-duplicate inquiry starts as `RECEIVED` and is analyzed asynchronously.
-
-### Create an administrator session
-
-```http
-POST http://localhost:3000/api/v1/auth/login
-Content-Type: application/json
-```
-
-```json
-{
-  "username": "admin",
-  "password": "demo-admin-password"
-}
-```
-
-The response sets the signed `HttpOnly` session cookie and returns a `csrfToken`. Browsers send the cookie automatically because the frontend uses credentialed requests. Non-browser clients must retain the `Set-Cookie` value and send it as `Cookie` on later requests.
-
-### List inquiries for the admin table
-
-```http
-GET http://localhost:3000/api/v1/admin/inquiries?page=1&limit=25&sortBy=createdAt&sortOrder=desc
-Cookie: ca_session=the-signed-session-cookie
-```
-
-Example filters can be combined:
-
-```text
-?status=READY&category=SALES&priority=HIGH&replyRecommended=true&search=Mari
-```
-
-### Get inquiry details
-
-Replace `{id}` with the ID returned by the public endpoint or admin list:
-
-```http
-GET http://localhost:3000/api/v1/admin/inquiries/{id}
-Cookie: ca_session=the-signed-session-cookie
-```
-
-### Read the active company prompt
-
-```http
-GET http://localhost:3000/api/v1/admin/settings/ai
-Cookie: ca_session=the-signed-session-cookie
-```
-
-### Update the company prompt
-
-```http
-PUT http://localhost:3000/api/v1/admin/settings/ai
-Content-Type: application/json
-Cookie: ca_session=the-signed-session-cookie
-x-csrf-token: token-returned-by-login-or-session
-```
-
-```json
-{
-  "companyPrompt": "We build websites for small businesses. Keep replies concise and never promise a price or delivery date."
-}
-```
-
-Each save creates a new immutable prompt version. Send an empty `companyPrompt` to reset the additional business context. Prompt changes apply only to future analyses.
-
-### Restore or end a session
-
-`GET /api/v1/auth/session` restores the current user and returns a fresh copy of the deterministic per-session CSRF token after a page reload. `POST /api/v1/auth/logout` requires that token in `x-csrf-token`, revokes the database session, and clears the cookie.
-
-## 7. Verification and production build
-
-Run the complete local quality checks:
-
-```powershell
-npm run typecheck
-npm test
-npm run build
-```
-
-Start the compiled application:
-
-```powershell
-npm start
-```
-
-`npm start` runs `dist/server.js`, so run `npm run build` first. Apply committed migrations with `npm run db:deploy` before starting a newly deployed version.
-
-## Database inspection
-
-Prisma Studio provides a simple local database interface:
-
-```powershell
-npm run db:studio
-```
+- The published admin credential demonstrates session mechanics, not private
+  access control.
+- Inquiry data is plaintext and must be synthetic.
+- AI jobs and rate-limit state are process-local; this is suitable for the demo,
+  not for horizontally scaled or guaranteed processing.
+- Docker Compose starts only PostgreSQL; no database backups or production
+  deployment configuration are included.
+- AI suggestions are never sent or acted on automatically.
