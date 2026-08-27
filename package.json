@@ -22,6 +22,7 @@
   "type": "module",
   "dependencies": {
     "@fastify/rate-limit": "^11.2.0",
+    "@google/genai": "^2.19.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "dotenv": "^17.4.2",

@@ -586,7 +586,7 @@ Result: the web form can safely submit an inquiry and immediately receive its ID
 
 ### Phase 3 — Gemini analysis
 
-- Define the strict structured-output schema.
+- **Completed on 2026-08-27:** Define the strict structured-output schema, including a Gemini-compatible JSON Schema, strict backend Zod validation, and unit tests.
 - Create the `AnalysisProvider` interface and Gemini implementation.
 - Implement prompt composition with fixed application rules, a versioned company prompt, request-specific instructions, and clearly separated untrusted customer input.
 - Send the JSON Schema to Gemini and validate the response again with Zod.
